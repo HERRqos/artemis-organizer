@@ -1,6 +1,6 @@
 # Booking assistant — WhatsApp + Google Calendar
 
-Conversational appointment booking for a psychology practice. LLM tool-calling
+Conversational appointment booking for a appointment organization. LLM tool-calling
 over WhatsApp, real availability from Google Calendar, human handoff for
 anything that isn't booking or FAQ.
 
