@@ -1,0 +1,8 @@
+[
+  {"question": "horario atención consulta", "answer": "La consulta atiende de lunes a viernes, de 9:00 a 19:00."},
+  {"question": "precio sesión coste tarifa", "answer": "La sesión individual tiene un coste de 60 €."},
+  {"question": "dónde está ubicación dirección", "answer": "La consulta está en Calle Ejemplo 12, 2º B."},
+  {"question": "primera sesión cómo funciona intake", "answer": "La primera sesión dura 60 minutos y sirve para conocerte y ver cómo trabajar juntas."},
+  {"question": "online videollamada", "answer": "También hay sesiones online por videollamada, con el mismo horario y precio."},
+  {"question": "cancelar aviso política", "answer": "Puedes cancelar o cambiar tu cita avisando con 24 horas de antelación."}
+]

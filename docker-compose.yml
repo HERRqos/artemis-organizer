@@ -1,0 +1,44 @@
+# Local dev only. On Fly/Railway these same images run as separate
+# processes with managed Redis/Postgres in place of the two containers here.
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: assistant
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+
+  webhook:
+    build:
+      context: .
+      dockerfile: services/webhook/Dockerfile
+    env_file: [.env]
+    ports: ["8080:8080"]
+    depends_on: [redis]
+
+  engine:
+    build:
+      context: .
+      dockerfile: services/engine/Dockerfile
+    env_file: [.env]
+    volumes:
+      - ./secrets:/secrets:ro
+      - ./services/engine/data:/srv/data:ro
+    depends_on: [redis, postgres]
+
+  reminder:
+    build:
+      context: .
+      dockerfile: services/reminder/Dockerfile
+    env_file: [.env]
+    volumes:
+      - ./secrets:/secrets:ro
+    depends_on: [redis]
+
+volumes:
+  pgdata:
