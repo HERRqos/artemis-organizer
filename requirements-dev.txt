@@ -1,0 +1,5 @@
+-e ./shared
+-r services/webhook/requirements.txt
+-r services/engine/requirements.txt
+-r services/reminder/requirements.txt
+pytest

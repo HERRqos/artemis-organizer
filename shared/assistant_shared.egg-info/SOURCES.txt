@@ -1,0 +1,12 @@
+pyproject.toml
+assistant_shared/__init__.py
+assistant_shared/calendar.py
+assistant_shared/config.py
+assistant_shared/models.py
+assistant_shared/queue.py
+assistant_shared/whatsapp.py
+assistant_shared.egg-info/PKG-INFO
+assistant_shared.egg-info/SOURCES.txt
+assistant_shared.egg-info/dependency_links.txt
+assistant_shared.egg-info/requires.txt
+assistant_shared.egg-info/top_level.txt

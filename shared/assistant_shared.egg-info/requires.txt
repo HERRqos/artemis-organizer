@@ -1,0 +1,6 @@
+redis>=5.0
+httpx>=0.27
+
+[calendar]
+google-api-python-client>=2.150
+google-auth>=2.35
