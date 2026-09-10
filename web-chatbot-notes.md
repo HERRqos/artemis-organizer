@@ -31,9 +31,15 @@ new web-facing entry point, instead of WhatsApp, for a chat widget on a site
   - `services/webchat/app/core.py` — pure logic version (no FastAPI types),
     same pattern as `webhook/app/core.py`.
   - own `Dockerfile`, own `requirements.txt`.
-- A reply path for the web: WhatsApp's send step (`whatsapp.py`) doesn't
-  apply — for web chat the reply can likely just be returned directly in the
-  HTTP/websocket response, no separate "send" client needed.
+- No outbound "client" file needed for web (unlike whatsapp.py/a future
+  instagram.py). Those exist because replying means calling a third-party
+  API with its own auth token. Web chat is synchronous: the same request
+  handler that received the message is still holding the connection when
+  conversation.run() returns, so the reply is just the HTTP response body
+  (or a websocket push) — no external call, so nothing to wrap in a module.
+  This also means webchat does NOT plug into the whatsapp/instagram
+  OUTBOUND_CLIENTS dispatch in engine's main.py — it bypasses that worker
+  entirely and calls conversation.run() inline in its own small service.
 - The actual chat widget itself (HTML/JS) — front-end, lives on the website,
   not in this Python backend.
 - `docker-compose.yml` — add a service entry for the new `webchat` container.
@@ -52,3 +58,26 @@ Implication to remember: the tool-calling loop (LLM + calendar calls) can
 take a few seconds, especially across multiple tool rounds — the endpoint
 needs a long-enough request timeout (and the widget should show a "typing…"
 state) instead of assuming a near-instant reply like a normal REST call.
+
+## Caveat: shared quotas mean web traffic can affect WhatsApp/Instagram too
+
+Not process isolation — `webchat` runs in its own container, so a flood
+there can't crash `engine` directly. The real risk is shared external
+resources that every channel draws from:
+
+- **ANTHROPIC_API_KEY is one account-wide rate-limit bucket.** A spike of
+  web chat traffic burns the same requests/tokens-per-minute quota that
+  WhatsApp/Instagram replies depend on — a web-side flood can cause 429s
+  on WhatsApp/Instagram too, not just on the site.
+- **Same story for the Google Calendar service account/quota** — shared
+  by every channel's `check_availability`/`book_appointment` calls.
+- **The web endpoint has no protection today**, unlike the WhatsApp
+  webhook (which verifies Meta's HMAC signature, and sits behind Meta's
+  own platform-level abuse throttling before anything reaches us). A
+  plain public `/chat` endpoint has no rate limiting, auth, or CAPTCHA —
+  the easiest of the three channels to brute-force or flood.
+
+Before shipping the public web chat: add per-IP/per-session rate limiting
+on the new endpoint (a simple Redis-backed counter would do, Redis is
+already there) — otherwise a spike or attack on the website can degrade
+or break replies on WhatsApp/Instagram, not just the web widget.
