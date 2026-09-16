@@ -10,7 +10,7 @@ import redis
 
 class SessionStore:
     def __init__(self, url: str, ttl_seconds: int = 12 * 3600, max_turns: int = 20):
-        self._r = redis.Redis.from_url(url, decode_responses=True)
+        self._r = redis.Redis.from_url(url, decode_responses=True, socket_keepalive=True)
         self._ttl = ttl_seconds
         self._max_turns = max_turns
 

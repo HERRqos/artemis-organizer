@@ -25,7 +25,7 @@ class Queue(Protocol):
 
 class RedisStreamQueue:
     def __init__(self, url: str, stream: str, group: str = "workers"):
-        self._r = redis.Redis.from_url(url, decode_responses=True)
+        self._r = redis.Redis.from_url(url, decode_responses=True, socket_keepalive=True, socket_timeout=None)
         self._stream = stream
         self._group = group
         self._ensure_group()

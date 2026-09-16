@@ -5,7 +5,7 @@ class RedisDedupe:
     """SET NX EX — first writer wins, key expires so Redis stays small."""
 
     def __init__(self, url: str, ttl_seconds: int = 24 * 3600, prefix: str = "seen:"):
-        self._r = redis.Redis.from_url(url, decode_responses=True)
+        self._r = redis.Redis.from_url(url, decode_responses=True,socket_keepalive=True)
         self._ttl = ttl_seconds
         self._prefix = prefix
 

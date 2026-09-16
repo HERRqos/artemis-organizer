@@ -131,3 +131,34 @@ per-client memory in Redis - session.py
  - The actual WhatsApp chat thread the client sees in their own app (and what you'd see in Meta's tools) is stored by Meta/WhatsApp itself, under their own retention rules — completely separate from this Redis TTL, and nothing here deletes or configures that. The client's visible chat history is untouched regardless of what Redis forgets.
  - this one is the one that knows to who answer with whatsapp.py
  - Confirmed by the earlier notes: SessionStore keys history by WhatsApp phone number (sender) — Instagram needs its own id shape and web chat needs a browser session id instead. See web-chatbot-notes.md's "Needs modification" section for the concrete plan for the web case.
+
+
+On runniung test
+
+ - pytest walks up from a test file's folder as long as it finds __init__.py files, and stops at the first folder that doesn't have one — that folder is what gets added to sys.path. tests/ has no __init__.py, so the walk-up stops right there, and the repo root (where services/ lives) never gets added — hence "module not found."
+ - Adding an empty conftest.py at the repo root fixes it because pytest always discovers and imports every conftest.py it finds, using that same walk-up rule. Since the repo root also has no __init__.py, the walk-up for conftest.py stops there too — so that folder gets added to sys.path instead. Once the repo root is on the path, services/ becomes visible as a real package, and the test's import succeeds.
+
+ "Dedupe" = short for "de-duplicate" — it just means "notice when the same thing arrives twice, and only act on it once."
+ the fakes make the test possible at all (no real Redis needed), and call() just makes each individual test shorter to write — two different jobs, not really "continuing to test other functions."
+
+  Quick mental map of HTTP status codes, since it's useful beyond this project:
+  - 2xx = success (this code uses 200)
+  - 4xx = the client did something wrong — 400 malformed, 401 not authenticated at all, 403 authenticated-but-not-allowed (or here, "can't verify who you are"), 404 not found
+  - 5xx = the server itself broke
+
+  HMAC = Hash-based Message Authentication Code. It's a way to prove two things at once: "this message wasn't tampered with" and "whoever sent it knows a shared secret" — without ever sending the secret itself over the
+  wire.
+
+  detail worth remembering from earlier: it uses hmac.compare_digest() instead of a plain ==. A normal string comparison stops at the first mismatched character, which leaks timing information — an attacker could measure how long the comparison takes to slowly guess the correct signature byte-by-byte. compare_digest always takes the same amount of time regardless of where the mismatch is, closing that side-channel.
+
+
+Debugging: engine kept crashing on first e2e run (redis.exceptions.TimeoutError)
+
+ - Symptom: postgres/redis/webhook/reminder all came up fine; engine crashed every time, always at the same point — inside queue.consume()'s xreadgroup call in shared/assistant_shared/queue.py.
+ - Only engine does a BLOCKING Redis read (XREADGROUP ... BLOCK 5000 — hold the connection open, wait up to 5s for a new message). webhook and reminder only ever do instant, fire-and-forget Redis calls (xadd, set, seen) — never sit idle on the connection.
+ - First theory (wrong, or at least incomplete): Docker Desktop's WSL2 virtual network silently drops long-idle connections, like a switchboard operator hanging up a call it thinks was abandoned during silence. Fix tried: socket_keepalive=True (background "still here?" pings so the connection never looks idle). Didn't fix it.
+ ! Correction: the failure was DETERMINISTIC — crashed at the exact same spot both times, not randomly. Random NAT/idle-drop flakiness wouldn't behave that consistently. That pointed to something more precise: a race between two timers set to the exact same value, not network flakiness.
+ - Real cause: Redis server is told "wait up to BLOCK 5000ms, then respond (even if empty)." The redis-py CLIENT was also applying its own read deadline to that same call, effectively equal to that same 5000ms with zero margin. Any real round-trip latency (a virtualized Docker Desktop/WSL2 network adds more of this than bare metal) means the client's deadline expires a few ms BEFORE the server's answer arrives — every single time, not occasionally.
+ - Fix: stop the client from applying that tight matching deadline — tell it to wait indefinitely instead, since blocking-and-waiting all day is literally this worker's job:
+   self._r = redis.Redis.from_url(url, decode_responses=True, socket_keepalive=True, socket_timeout=None)
+ - The keepalive change wasn't wrong to make, just wasn't the actual cause here — left in alongside the socket_timeout=None fix, doesn't hurt.

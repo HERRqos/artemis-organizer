@@ -65,12 +65,16 @@ know if someone's a new or returning patient, no status tracking.
   where it would live — this project never asks for email today, only
   phone + name.
 
-## 4. Management UI for FAQ content / office hours
+## 4. Management console — settings + patient organization/triage
 
 **Gap:** no self-service way for her to update `practice.json` (FAQ
-answers) or office-hours env vars. Today every change needs a developer to
-edit the file/env var and restart the engine service — matches the
-README's own "admin dashboard" line under deliberately deferred.
+answers) or office-hours env vars — every change needs a developer to
+edit the file/env var and restart the engine service (matches the
+README's own "admin dashboard" line under deliberately deferred). Fuller
+vision, once patient data exists (item 3): a place for her to see/organize
+her patients — flag priority or risk level, review who escalated and why
+(ties into the Escalation section's `reason`/keyword-gate vs. LLM-tool
+distinction) — not just edit config.
 
 **Smallest useful version first, not a full admin framework:**
 - A small password-protected internal page exposing just two things: an
@@ -83,3 +87,43 @@ README's own "admin dashboard" line under deliberately deferred.
 - Could start even simpler than a web UI at all: she edits a Google Sheet
   herself, and a small script syncs it into `practice.json` — cheaper to
   build than a real page, worth trying before investing in one.
+- The patient-organization/risk-flagging layer depends on item 3 (patient
+  database) existing first — it's a view on top of that data, not a
+  separate feature to build standalone.
+
+## 5. Multi-tenant SaaS architecture (one deployment, many therapists)
+
+**Goal:** instead of a separate `docker compose up` stack per therapist,
+one running deployment serves many, each managed through the console
+above instead of redeployment.
+
+**Gap:** `Settings` (`config.py`) is loaded ONCE, globally, at process
+startup — one calendar, one owner, one set of office hours, one WhatsApp
+number, for the life of the process. Nothing today identifies *which*
+therapist an inbound message is for.
+
+**What it would need:**
+- Meta's real webhook payload carries `value.metadata.phone_number_id` —
+  not currently read by `parse_inbound()` — telling you which registered
+  number received the message. That becomes the tenant-routing key (Meta
+  supports multiple numbers under one Business/App).
+- A tenant/practice table (the same unused `postgres` from item 3): one
+  row per therapist — `calendar_id`, office hours, `owner_whatsapp`, FAQ
+  content, `phone_number_id`.
+- `Settings` becomes a per-message lookup (by `phone_number_id`) instead
+  of a fixed object built once in `main()`.
+- Stays simple: one shared service account can already be shared by any
+  number of therapists' calendars (only `calendar_id` needs to be
+  per-tenant, not the credential) — same for the Anthropic key, which can
+  likely stay shared/yours (the SaaS-absorbs-cost model already noted
+  under Engine in the learning file) rather than per-tenant. One shared
+  Redis queue is also fine — no need to multiply infrastructure, just
+  route by the payload's `phone_number_id` once picked up.
+- The genuinely hard part: getting multiple therapists' WhatsApp numbers
+  registered under a setup managed centrally — Meta has a formal path for
+  this (a "Tech Provider"-style flow for managing numbers on behalf of
+  clients), meaningfully more involved than the current single-number dev
+  setup.
+
+**Sequencing:** get a single-tenant end-to-end test fully working first —
+this architecture is a rethink for later, not a blocker on testing now.

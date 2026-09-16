@@ -1,0 +1,24 @@
+# fly.toml app configuration file generated for arty-organizer-webhook on 2026-09-16T16:31:49+02:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'arty-organizer-webhook'
+primary_region = 'fra'
+
+[build]
+  dockerfile = 'services/webhook/Dockerfile'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024
