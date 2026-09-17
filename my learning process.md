@@ -161,4 +161,24 @@ Debugging: engine kept crashing on first e2e run (redis.exceptions.TimeoutError)
  - Real cause: Redis server is told "wait up to BLOCK 5000ms, then respond (even if empty)." The redis-py CLIENT was also applying its own read deadline to that same call, effectively equal to that same 5000ms with zero margin. Any real round-trip latency (a virtualized Docker Desktop/WSL2 network adds more of this than bare metal) means the client's deadline expires a few ms BEFORE the server's answer arrives — every single time, not occasionally.
  - Fix: stop the client from applying that tight matching deadline — tell it to wait indefinitely instead, since blocking-and-waiting all day is literally this worker's job:
    self._r = redis.Redis.from_url(url, decode_responses=True, socket_keepalive=True, socket_timeout=None)
+
+
+Debugging: Meta webhook verified fine but real WhatsApp messages never arrived
+
+ - Symptom: the app-level Callback URL + Verify Token GET handshake succeeded every time (200 OK, correct challenge echoed back). Meta's own "Try it out" dashboard preview showed the sent message. But no POST /webhook ever showed up in fly logs — real messages just went nowhere.
+ - Core misunderstanding: Meta's WhatsApp setup has TWO separate, independent layers, and fixing one doesn't fix the other:
+   1. App-level webhook config (Callback URL + Verify Token + which fields, e.g. messages) — generic to the app, just "here's where to reach me if you ever need to." The GET verify handshake only tests THIS layer.
+   2. WABA-level subscription (the subscribed_apps edge) — this is what actually tells Meta "THIS SPECIFIC WhatsApp Business Account's messages should route to THAT app's webhook." Completely separate authorization.
+ - I had TWO different WABAs: Arty_orga (bot granted "People" access, but zero phone numbers — useless) and Test WhatsApp Business Account (had the real test number, but had never been explicitly subscribed via subscribed_apps).
+ ! Correction: granting "People" access to a WABA is general management permission (view/administer things about that account) — it does NOT automatically mean "route this account's events to my webhook." That's the separate subscribed_apps authorization, which stayed unset even after People access was granted correctly.
+ - Extra wrinkle that cost real time: once we knew we needed to call subscribed_apps via the Graph API, I kept accidentally using WHATSAPP_PHONE_NUMBER_ID instead of the WABA's own (different) ID. These are different object types — subscribed_apps only exists as an edge on a WABA, not a phone number. Proven conclusively by testing the SAME id against three endpoints:
+   - POST /<id>/messages -> succeeded (this endpoint only works on a phone-number id)
+   - POST /<id>/subscribed_apps -> failed, "does not exist / doesn't support this operation" (WABA-only edge)
+   - GET /<id>/phone_numbers -> failed, "nonexisting field" (also WABA-only edge)
+   All three pointing the same direction confirmed which id was actually which type.
+ - Fix: find the WABA's own "Account ID" (business.facebook.com -> WhatsApp Accounts -> the account itself, NOT the phone number), then:
+   curl.exe -X POST "https://graph.facebook.com/v21.0/<real-WABA-ID>/subscribed_apps" -H "Authorization: Bearer <token>"
+   -> {"success":true}. Real messages started flowing to the webhook immediately after.
+ - Side lesson: PowerShell's `curl` is secretly an alias for Invoke-WebRequest, which does NOT accept real curl's `-H "string"` syntax (wants a -Headers hashtable instead) — use `curl.exe` explicitly to get the real curl binary and real curl syntax.
+ - Side lesson: never paste a real bearer token into chat/logs you share — once exposed, rotate it, even if the practical risk is low. Happened a few times this session; each time meant regenerating the token afterward.
  - The keepalive change wasn't wrong to make, just wasn't the actual cause here — left in alongside the socket_timeout=None fix, doesn't hurt.
