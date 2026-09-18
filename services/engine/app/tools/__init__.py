@@ -90,6 +90,7 @@ class ToolContext:
         self.sender = sender
         self.escalated = False
         self.escalation_reason = ""
+        self.booking_summary:str|None=None
 
 
 def _fmt(dt: datetime) -> str:
@@ -110,10 +111,12 @@ def _check_availability(args: dict, ctx: ToolContext) -> dict:
 
 def _book(args: dict, ctx: ToolContext) -> dict:
     start = _parse(args["start"], ctx)
-    if start not in ctx.calendar.free_slots(start, start):
+    end= start + timedelta(minutes=ctx.settings.slot_minutes)
+    if start not in ctx.calendar.free_slots(start, end):
         return {"ok": False, "error": "slot_taken"}
     appt = ctx.calendar.book(start, ctx.sender, args["client_name"], args.get("note", ""))
-    return {"ok": True, "start": _fmt(appt.start)}
+    ctx.booking_summary=f"Nueva cita: {args['client_name']} - {_fmt(appt.start)}"
+    return {"ok": True, "start": _fmt(appt.start),"add_to_calendar_url":appt.add_to_calendar_url}
 
 
 def _reschedule(args: dict, ctx: ToolContext) -> dict:
@@ -121,9 +124,11 @@ def _reschedule(args: dict, ctx: ToolContext) -> dict:
     if not existing:
         return {"ok": False, "error": "no_appointment_found"}
     new_start = _parse(args["new_start"], ctx)
-    if new_start not in ctx.calendar.free_slots(new_start, new_start):
+    new_end= new_start+timedelta(minutes=ctx.settings.slot_minutes)
+    if new_start not in ctx.calendar.free_slots(new_start, new_end):
         return {"ok": False, "error": "slot_taken"}
     appt = ctx.calendar.move(existing.event_id, new_start)
+    ctx.booking_summary=f"Cita reprogramada:{ctx.sender} - {_fmt(appt.start)}"
     return {"ok": True, "start": _fmt(appt.start)}
 
 
@@ -132,6 +137,7 @@ def _cancel(_args: dict, ctx: ToolContext) -> dict:
     if not existing:
         return {"ok": False, "error": "no_appointment_found"}
     ctx.calendar.cancel(existing.event_id)
+    ctx.booking_summary=f"Cita cancelada:{ctx.sender} - {_fmt(existing.start)}"
     return {"ok": True, "cancelled": _fmt(existing.start)}
 
 

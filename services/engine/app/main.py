@@ -49,6 +49,13 @@ def main() -> None:
                 # ack regardless: a poisoned message must not loop forever.
                 queue.ack(item.receipt)
 
+def notify_owner_booking(whatsapp,settings,msg,summary:str)->None:
+    if not settings.owner_whatsapp:
+        return
+    whatsapp.send_text(
+        settings.owner_whatsapp,
+        f"{summary}\nDe: {msg.profile_name or msg.sender} ({msg.sender})",
+    )
 
 def handle(msg, settings, sessions, whatsapp, calendar, practice, conversation) -> None:
     if sessions.is_escalated(msg.sender):
@@ -68,6 +75,8 @@ def handle(msg, settings, sessions, whatsapp, calendar, practice, conversation) 
     if ctx.escalated:
         notify_owner(whatsapp, settings, msg, ctx.escalation_reason)
         sessions.escalate(msg.sender)
+    elif ctx.booking_summary:
+        notify_owner_booking(whatsapp,settings,msg,ctx.booking_summary)
 
     if reply:
         whatsapp.send_text(msg.sender, reply)

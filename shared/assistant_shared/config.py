@@ -31,6 +31,7 @@ class Settings:
     llm_model: str
 
     google_credentials_file: str
+    google_credentials_json:str
     calendar_id: str
 
     timezone: str
@@ -58,9 +59,8 @@ def load_settings() -> Settings:
         graph_api_version=os.environ.get("GRAPH_API_VERSION", "v21.0"),
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
         llm_model=os.environ.get("LLM_MODEL", "claude-sonnet-5"),
-        google_credentials_file=os.environ.get(
-            "GOOGLE_CREDENTIALS_FILE", "/secrets/google-sa.json"
-        ),
+        google_credentials_file=os.environ.get("GOOGLE_CREDENTIALS_FILE", "/secrets/google-sa.json"),
+        google_credentials_json=os.environ.get("GOOGLE_CREDENTIALS_JSON",""),
         calendar_id=os.environ.get("CALENDAR_ID", "primary"),
         timezone=os.environ.get("TIMEZONE", "Europe/Madrid"),
         office_open=os.environ.get("OFFICE_OPEN", "09:00"),

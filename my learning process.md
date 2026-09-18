@@ -22,7 +22,7 @@ Engine ("the brain")
  - you'll need an Anthropic API key (it's pay-as-you-go billing tied to usage, not a flat "subscription"), stored in your .env and read via settings into AnthropicLLM(api_key=...).
  - As the code is written today, there's one ANTHROPIC_API_KEY in Settings, used centrally by engine. If you run this as a hosted service for multiple practices, that one key is yours — you'd see every call and pay for all of it in your own Anthropic Console, and your customers would never touch the key. That's the standard SaaS pattern: you absorb the API cost and price it into what you charge them. The alternative — each customer brings their own key (BYOK) — would put cost and visibility on them instead, but the code as it stands has no per-tenant key support;
  - it's built single-tenant (one deployment, one key, one practice). Multi-tenant would be an actual feature to add later.
- - it is not better to host an LLM, not at this stage. Self-hosting only pays off once volume is high enough that a GPU server running 24/7 (a fixed cost, whether used or not) beats paying per-message via the API. A solo practice — or even dozens of them as SaaS — stays cheap on the API because you only pay for what's actually sent. Self-hosting also brings back the ops burden (uptime, scaling, patching, model updates) the API was specifically chosen to avoid, plus a real risk that an open model's tool-calling reliability isn't as good as Claude's. It's a later optimization for serious sustained volume, not a starting point.
+ - it is not better to host an LLM, not at this stage. Self-hosting only pays off once volume is high enough that a GPU server röunning 24/7 (a fixed cost, whether used or not) beats paying per-message via the API. A solo practice — or even dozens of them as SaaS — stays cheap on the API because you only pay for what's actually sent. Self-hosting also brings back the ops burden (uptime, scaling, patching, model updates) the API was specifically chosen to avoid, plus a real risk that an open model's tool-calling reliability isn't as good as Claude's. It's a later optimization for serious sustained volume, not a starting point.
  - At the code level, yes — that's exactly why llm.py defines an LLM Protocol with one method (complete). AnthropicLLM is just one implementation; a self-hosted option would be a new class implementing the same interface, swapped in via config, and conversation.py never changes.
  - At the infra level it's a much bigger lift than "swap a class" though — you'd also need to stand up model-serving infrastructure yourself (e.g. vLLM/TGI on GPU servers), pick a model that reliably supports tool-calling in a compatible schema (or write a translation shim), and own the scaling/uptime/patching that the API route was chosen specifically to avoid. So: one line of code to swap, a real ops project to make that swap actually work well.
 
@@ -182,3 +182,33 @@ Debugging: Meta webhook verified fine but real WhatsApp messages never arrived
  - Side lesson: PowerShell's `curl` is secretly an alias for Invoke-WebRequest, which does NOT accept real curl's `-H "string"` syntax (wants a -Headers hashtable instead) — use `curl.exe` explicitly to get the real curl binary and real curl syntax.
  - Side lesson: never paste a real bearer token into chat/logs you share — once exposed, rotate it, even if the practical risk is low. Happened a few times this session; each time meant regenerating the token afterward.
  - The keepalive change wasn't wrong to make, just wasn't the actual cause here — left in alongside the socket_timeout=None fix, doesn't hurt.
+
+
+Debugging: getting Google credentials onto engine's Fly deployment
+
+ - Problem: local Docker Compose bind-mounts secrets/google-sa.json into the container; Fly deployments have no access to the local filesystem at all, and .dockerignore excludes **/secrets from the build anyway. Two options: bake the file into the image (fast, but the secret ends up sitting in the image/registry) vs. inject it as an env var (more correct, needs a small code change). Chose the code change.
+ - Code change (backward-compatible — local .env never sets this, so Docker Compose keeps using the file path exactly as before):
+   config.py: added `google_credentials_json: str` field to Settings + `google_credentials_json=os.environ.get("GOOGLE_CREDENTIALS_JSON", "")` in load_settings().
+   calendar.py: if settings.google_credentials_json is set, use `service_account.Credentials.from_service_account_info(json.loads(...))`; else fall back to the existing `from_service_account_file(...)`.
+ - First attempt to set the secret crashed the app with `json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2`.
+ ! Correction/root cause: NOT a JSON formatting problem — a shell-quoting problem. `fly secrets set KEY="$json"` embeds a value that ITSELF contains double quotes (`{"type":"service_account",...}`) inside an already-double-quoted PowerShell argument. The inner quotes collide with the outer ones when PowerShell reconstructs the command line for the external fly.exe process, truncating/corrupting the value before Fly ever saw real JSON.
+ - Fix: sidestep command-line argument quoting entirely by writing a KEY=VALUE line to a temp file (no-BOM, same lesson as the .env fix) and importing via file redirection instead of an inline argument:
+   $json = (Get-Content secrets\google-sa.json -Raw | ConvertFrom-Json | ConvertTo-Json -Compress)
+   [System.IO.File]::WriteAllText("$PWD\temp_secret.txt", "GOOGLE_CREDENTIALS_JSON=$json", (New-Object System.Text.UTF8Encoding $false))
+   cmd /c "fly secrets import --app arty-organizer-engine < temp_secret.txt"
+   Remove-Item temp_secret.txt
+ - Second edit slip: after fixing the JSON parsing, still crashed with `TypeError: expected str, bytes or os.PathLike object, not dict` — copy/paste left the method name as `from_service_account_file(info, ...)` instead of switching it to `from_service_account_info(info, ...)`. One-word fix. Lesson: when adding a new branch that mirrors an existing one, double check the FUNCTION NAME changed too, not just its argument.
+
+
+Debugging: booking failed with Google Calendar error "timeRangeEmpty" — real code bug, not env/config
+
+ - First (wrong) suspicion: insufficient calendar-sharing permission on the service account, since check_availability (a read) worked but book_appointment (a write) failed. Checked it — permission was already correctly "Make changes and see all event details." Not the cause.
+ - Real cause, found from the escalation reason text itself ("booking API falla con timeRangeEmpty"): `_book()` in tools/__init__.py calls `ctx.calendar.free_slots(start, start)` — passing the SAME instant as both the start and end of the availability re-check. That becomes `timeMin == timeMax` in the Google freebusy query, which Google's API explicitly rejects as an empty/invalid range. `check_availability` never hit this because it queries a real day-spanning range (date_from 00:00 to date_to 23:59), not a single point repeated twice.
+ - `_reschedule()` had the identical bug: `free_slots(new_start, new_start)`.
+ - Fix (both functions): give the re-check an actual end boundary matching the real appointment duration, not the same point twice:
+   end = start + timedelta(minutes=ctx.settings.slot_minutes)
+   if start not in ctx.calendar.free_slots(start, end):
+ - This is a genuine pre-existing bug that had simply never been exercised before — booking had never actually been tested end-to-end (locally or otherwise) until this Fly deployment. Nothing about the deployment itself caused it.
+ - Nice validation, not a bug: when the tool kept failing, the LLM correctly gave up after retrying once, called escalate_to_human with a clear technical reason, the owner got notified with the real error detail, and the client got a graceful handoff message instead of a broken reply. The safety-net design worked exactly as intended under a real failure.
+ - Reminder for next time this fires for real: escalation mutes the sender for 24h with no built-in early reset — to clear it manually: `fly ssh console --app arty-organizer-redis -C "redis-cli DEL handoff:<sender-number>"`.
+ - Same underlying lesson as the earlier .env BOM issue: piping/passing multi-line or quote-heavy text through PowerShell to an external executable is unreliable — writing to a file and using cmd's native `<` redirection avoids PowerShell's own argument/encoding reconstruction entirely.

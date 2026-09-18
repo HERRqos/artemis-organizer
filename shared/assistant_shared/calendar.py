@@ -7,12 +7,15 @@ Google account cannot invite guests, so the client's details go in the
 event body instead of as an attendee.
 """
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 from assistant_shared.config import Settings
+import json
+
+import urllib.parse
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 PHONE_PROP = "client_phone"
@@ -23,13 +26,15 @@ class Appointment:
     event_id: str
     start: datetime
     summary: str
-
+    add_to_calendar_url:str=""
 
 class CalendarService:
     def __init__(self, settings: Settings):
-        creds = service_account.Credentials.from_service_account_file(
-            settings.google_credentials_file, scopes=SCOPES
-        )
+        if settings.google_credentials_json:
+            info=json.loads(settings.google_credentials_json)
+            creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+        else:
+            creds = service_account.Credentials.from_service_account_file(settings.google_credentials_file, scopes=SCOPES)
         self._api = build("calendar", "v3", credentials=creds, cache_discovery=False)
         self._cal = settings.calendar_id
         self._s = settings
@@ -91,20 +96,32 @@ class CalendarService:
             .execute()
             .get("items", [])
         )
+    def _add_to_calendar_link(self, start:datetime,end:datetime,summary:str,details:str)->str:
+        fmt="%Y%m%dT%H%M%SZ"
+        params ={
+            "action":"Template",
+            "text":summary,
+            "dates":f"{start.astimezone(timezone.utc).strftime(fmt)}/{end.astimezone(timezone.utc).strftime(fmt)}",
+            "details":details,
+        }
+        return "https://calendar.google.com/calendar/render?"+urllib.parse.urlencode(params);
 
     # ---------- writes ----------
 
     def book(self, start: datetime, phone: str, client_name: str, note: str = "") -> Appointment:
         end = start + timedelta(minutes=self._s.slot_minutes)
+        summary = f"Sesión — {client_name}"
+        description = f"Reservado por WhatsApp.\nTeléfono: {phone}\n{note}".strip()
         body = {
-            "summary": f"Sesión — {client_name}",
-            "description": f"Reservado por WhatsApp.\nTeléfono: {phone}\n{note}".strip(),
+            "summary": summary,
+            "description": description,
             "start": {"dateTime": start.isoformat(), "timeZone": self._s.timezone},
             "end": {"dateTime": end.isoformat(), "timeZone": self._s.timezone},
             "extendedProperties": {"private": {PHONE_PROP: phone}},
         }
         ev = self._api.events().insert(calendarId=self._cal, body=body).execute()
-        return Appointment(ev["id"], start, ev.get("summary", ""))
+        link=self._add_to_calendar_link(start,end,summary,description)
+        return Appointment(ev["id"], start, ev.get("summary", ""),link)
 
     def move(self, event_id: str, new_start: datetime) -> Appointment:
         end = new_start + timedelta(minutes=self._s.slot_minutes)

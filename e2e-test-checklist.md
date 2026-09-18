@@ -145,12 +145,43 @@ actually hold a conversation. Check off as each is done.
         something that accepts INCOMING connections needs one, and those
         two are pure outbound background workers.
       - Confirmed stable after the fix — engine stayed up.
-- [ ] In a second terminal: `ngrok http 8080`
-- [ ] Take the ngrok https URL -> Meta App dashboard -> WhatsApp -> 
-      Configuration -> set Callback URL to `<ngrok-url>/webhook` and Verify
-      Token to the same `META_VERIFY_TOKEN` you invented above -> Verify
-      and save
-- [ ] Subscribe the app to the `messages` webhook field for WhatsApp
-- [ ] Text the test number from your verified test phone, watch
-      `docker compose logs -f webhook engine` for the message flowing
-      through
+- [x] ~~ngrok~~ / ~~cloudflared~~ — both blocked outright by company network
+      policy (real, not fixable client-side — see learning file). Pivoted to
+      deploying `webhook`, `engine`, and `redis` to Fly.io instead of
+      tunneling from the laptop at all. Full deploy story (Redis blocking-read
+      fix, WABA subscription saga, Google credentials via env var, PowerShell
+      quoting gotchas) is all in the learning file.
+- [x] Meta webhook Callback URL set to the deployed Fly URL
+      (`https://arty-organizer-webhook.fly.dev/webhook`) + Verify Token,
+      verified successfully
+- [x] Subscribed to `messages` — but this alone wasn't enough. Real fix needed
+      an explicit `POST /<real-WABA-ID>/subscribed_apps` Graph API call,
+      since "People" access on the WABA (in Business Settings) is a
+      DIFFERENT authorization than the actual message-routing subscription.
+      Full story + the phone-number-ID-vs-WABA-ID mixup in the learning file.
+- [x] Real WhatsApp message -> confirmed `POST /webhook` -> `enqueued
+      1 message(s)` in `webhook`'s Fly logs
+- [x] `engine` deployed to Fly too (own `fly.engine.toml`, no `[http_service]`
+      — pure background worker, no port), pointed at the same Fly-hosted
+      Redis, Google credentials injected via `GOOGLE_CREDENTIALS_JSON` env
+      var (code change in `calendar.py`/`config.py`) instead of a file mount
+- [x] Confirmed full round trip: WhatsApp message -> engine -> Claude ->
+      calendar tool call -> reply back on WhatsApp, working end to end
+- [x] Booked a real appointment through the WhatsApp conversation -> shows
+      up on the actual Google Calendar. Hit and fixed one genuine pre-existing
+      code bug along the way (`free_slots(start, start)` -> Google API
+      `timeRangeEmpty` error in `_book()`/`_reschedule()` — see learning file)
+
+## Still open / not yet tested
+
+- [ ] `reminder` service not deployed to Fly yet (only webhook/engine/redis)
+      — 24h-out WhatsApp template reminders untested
+- [ ] Multi-turn conversation robustness (the double `book_appointment` tool
+      call seen in one test — LLM retrying after a tool error — resolved
+      itself once the underlying bug was fixed, but worth watching for again)
+- [ ] Rotate `WHATSAPP_TOKEN`/`META_VERIFY_TOKEN` one more time at the end
+      of this testing session, since both were pasted in chat multiple times
+      during debugging — treat as compromised regardless of current risk
+      level assessment
+- [ ] Fly.io trial/billing status — check the dashboard for actual usage
+      and confirm nothing unexpected is being charged
