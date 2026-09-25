@@ -35,14 +35,20 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "properties": {
                 "start": {"type": "string", "description": "Inicio ISO 8601, p.ej. 2026-09-15T10:00:00"},
                 "client_name": {"type": "string"},
+                "client_email": {"type": "string","description":"Correo del Cliente"},
                 "note": {"type": "string", "description": "Nota breve y no clínica, opcional"},
             },
-            "required": ["start", "client_name"],
+            "required": ["start", "client_name","client_email"],
         },
     },
     {
         "name": "reschedule_appointment",
-        "description": "Mueve la próxima cita de este contacto a un horario libre.",
+        "description": (
+            "Busca y mueve la próxima cita de este este número de WhatsApp a un horario libre."
+            "La búsqueda es por número de teléfono, no por nombre — si no encuentra "
+            "cita, no digas que fue 'con tu nombre', simplemente di que no hay "
+            "ninguna cita agendada para este número."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {"new_start": {"type": "string"}},
@@ -51,7 +57,12 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "cancel_appointment",
-        "description": "Cancela la próxima cita de este contacto.",
+        "description": ( 
+            "Busca y cancela la próxima cita de este número de WhatsApp."
+            "La búsqueda es por número de teléfono, no por nombre — si no encuentra "
+            "cita, no digas que fue 'con tu nombre', simplemente di que no hay "
+            "ninguna cita agendada para este número."
+        ),
         "input_schema": {"type": "object", "properties": {}},
     },
     {
@@ -78,16 +89,30 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "required": ["reason"],
         },
     },
+    {
+        "name": "check_appointments_by_user",
+        "description": (
+            "Comprueba si este número de WhatsApp tiene una cita próxima agendada. "
+            "La búsqueda es por número de teléfono, no por nombre — si no encuentra "
+            "cita, no digas que fue 'con tu nombre', simplemente di que no hay "
+            "ninguna cita agendada para este número."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {}
+        },
+    },
 ]
 
 
 class ToolContext:
     def __init__(self, settings: Settings, calendar: CalendarService,
-                 practice: PracticeInfo, sender: str):
+                 practice: PracticeInfo, sender: str, clients):
         self.settings = settings
         self.calendar = calendar
         self.practice = practice
         self.sender = sender
+        self.clients= clients
         self.escalated = False
         self.escalation_reason = ""
         self.booking_summary:str|None=None
@@ -115,6 +140,9 @@ def _book(args: dict, ctx: ToolContext) -> dict:
     if start not in ctx.calendar.free_slots(start, end):
         return {"ok": False, "error": "slot_taken"}
     appt = ctx.calendar.book(start, ctx.sender, args["client_name"], args.get("note", ""))
+    ctx.clients.upsert_name(ctx.sender, args["client_name"])
+    ctx.clients.upsert_email(ctx.sender, args["client_email"])
+    ctx.clients.set_active_appointment(ctx.sender, appt.start)
     ctx.booking_summary=f"Nueva cita: {args['client_name']} - {_fmt(appt.start)}"
     return {"ok": True, "start": _fmt(appt.start),"add_to_calendar_url":appt.add_to_calendar_url}
 
@@ -128,15 +156,17 @@ def _reschedule(args: dict, ctx: ToolContext) -> dict:
     if new_start not in ctx.calendar.free_slots(new_start, new_end):
         return {"ok": False, "error": "slot_taken"}
     appt = ctx.calendar.move(existing.event_id, new_start)
+    ctx.clients.set_active_appointment(ctx.sender, appt.start)
     ctx.booking_summary=f"Cita reprogramada:{ctx.sender} - {_fmt(appt.start)}"
     return {"ok": True, "start": _fmt(appt.start)}
 
 
-def _cancel(_args: dict, ctx: ToolContext) -> dict:
+def _cancel(_args: dict, ctx: ToolContext) -> dict: 
     existing = ctx.calendar.appointment_for(ctx.sender)
     if not existing:
         return {"ok": False, "error": "no_appointment_found"}
     ctx.calendar.cancel(existing.event_id)
+    ctx.clients.clear_active_appointment(ctx.sender)
     ctx.booking_summary=f"Cita cancelada:{ctx.sender} - {_fmt(existing.start)}"
     return {"ok": True, "cancelled": _fmt(existing.start)}
 
@@ -151,6 +181,11 @@ def _escalate(args: dict, ctx: ToolContext) -> dict:
     ctx.escalation_reason = args.get("reason", "")
     return {"ok": True}
 
+def _check_appointments_by_user(args: dict, ctx: ToolContext) -> dict:
+    existing = ctx.calendar.appointment_for(ctx.sender)
+    if not existing:
+        return {"ok": False, "error": "no_appointment_found"}
+    return {"ok": True, "start": _fmt(existing.start)}
 
 HANDLERS: dict[str, Callable[[dict, ToolContext], dict]] = {
     "check_availability": _check_availability,
@@ -159,6 +194,7 @@ HANDLERS: dict[str, Callable[[dict, ToolContext], dict]] = {
     "cancel_appointment": _cancel,
     "get_practice_info": _practice_info,
     "escalate_to_human": _escalate,
+    "check_appointments_by_user":_check_appointments_by_user,
 }
 
 

@@ -24,9 +24,9 @@ class Conversation:
         self._llm = llm
         self._owner = owner_name
 
-    def run(self, user_text: str, history: list[dict], ctx: ToolContext) -> tuple[str, list[dict]]:
+    def run(self, user_text: str, history: list[dict], ctx: ToolContext,known_name:str) -> tuple[str, list[dict]]:
         """Returns (reply_text, new_history)."""
-        system = build_system_prompt(self._s, self._owner)
+        system = build_system_prompt(self._s, self._owner, known_name)
         messages = history + [{"role": "user", "content": user_text}]
 
         for round_no in range(MAX_TOOL_ROUNDS):
@@ -53,4 +53,6 @@ class Conversation:
                 return HANDOFF_MESSAGE.format(owner=self._owner), messages
 
         log.warning("tool loop hit MAX_TOOL_ROUNDS for %s", ctx.sender)
+        ctx.escalated=True
+        ctx.escalation_reason=ctx.escalation_reason or "tool loop exceeded MAX_TOOL_ROUNDS"
         return HANDOFF_MESSAGE.format(owner=self._owner), messages

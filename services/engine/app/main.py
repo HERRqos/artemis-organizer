@@ -16,6 +16,7 @@ from .session import SessionStore
 from .tools import ToolContext
 from assistant_shared.calendar import CalendarService
 from .tools.practice import PracticeInfo
+from .client import ClientStore
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("engine")
@@ -29,6 +30,7 @@ def main() -> None:
     sessions = SessionStore(settings.redis_url)
     whatsapp = WhatsAppClient(settings)
     calendar = CalendarService(settings)
+    clients=ClientStore(settings.database_url)
     practice = PracticeInfo()
     conversation = Conversation(
         settings, AnthropicLLM(settings.anthropic_api_key, settings.llm_model), OWNER_NAME
@@ -41,7 +43,7 @@ def main() -> None:
             try:
                 handle(
                     InboundMessage.from_dict(item.payload),
-                    settings, sessions, whatsapp, calendar, practice, conversation,
+                    settings, sessions, whatsapp, calendar, practice, clients, conversation,
                 )
             except Exception:
                 log.exception("failed to handle %s", item.payload.get("message_id"))
@@ -57,7 +59,7 @@ def notify_owner_booking(whatsapp,settings,msg,summary:str)->None:
         f"{summary}\nDe: {msg.profile_name or msg.sender} ({msg.sender})",
     )
 
-def handle(msg, settings, sessions, whatsapp, calendar, practice, conversation) -> None:
+def handle(msg, settings, sessions, whatsapp, calendar, practice, clients, conversation) -> None:
     if sessions.is_escalated(msg.sender):
         log.info("sender %s is in human handoff, staying quiet", msg.sender)
         return
@@ -65,18 +67,22 @@ def handle(msg, settings, sessions, whatsapp, calendar, practice, conversation) 
     if needs_immediate_handoff(msg.text):
         notify_owner(whatsapp, settings, msg, "keyword gate")
         sessions.escalate(msg.sender)
+        clients.mark_escalated(msg.sender)
         whatsapp.send_text(msg.sender, HANDOFF_MESSAGE.format(owner=OWNER_NAME))
         return
-
-    ctx = ToolContext(settings, calendar, practice, msg.sender)
-    reply, history = conversation.run(msg.text, sessions.history(msg.sender), ctx)
+    known = clients.get(msg.sender)
+    known_name=known["name"] if known else None
+    whatsapp.mark_read_and_typing(msg.message_id)
+    ctx = ToolContext(settings, calendar, practice, msg.sender, clients)
+    reply, history = conversation.run(msg.text, sessions.history(msg.sender), ctx, known_name)
     sessions.save(msg.sender, history)
 
     if ctx.escalated:
         notify_owner(whatsapp, settings, msg, ctx.escalation_reason)
         sessions.escalate(msg.sender)
+        clients.mark_escalated(msg.sender)
     elif ctx.booking_summary:
-        notify_owner_booking(whatsapp,settings,msg,ctx.booking_summary)
+        notify_owner_booking(whatsapp, settings, msg, ctx.booking_summary)
 
     if reply:
         whatsapp.send_text(msg.sender, reply)

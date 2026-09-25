@@ -1,0 +1,20 @@
+# fly.toml app configuration file generated for arty-organizer-postgres on 2026-09-24T14:13:17+02:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'arty-organizer-postgres'
+primary_region = 'fra'
+
+[build]
+  image = 'postgres:16'
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024
+
+[mounts]
+  source = "postgres_data"
+  destination = "/var/lib/postgresql/data"

@@ -48,3 +48,11 @@ class WhatsAppClient:
                 },
             }
         )
+
+    def mark_read_and_typing(self,message_id:str)->dict:
+        return self._post({
+            "messaging_product":"whatsapp",
+            "status":"read",
+            "message_id":message_id,
+            "typing_indicator":{"type":"text"},
+        })

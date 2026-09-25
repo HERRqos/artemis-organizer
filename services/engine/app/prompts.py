@@ -29,9 +29,9 @@ Si escriben fuera de ese horario, respondes igual, pero aclaras que
 _DAY_NAMES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 
-def build_system_prompt(settings: Settings, owner_name: str = "la consulta") -> str:
+def build_system_prompt(settings: Settings, owner_name: str = "la consulta", known_name: str | None = None) -> str:
     now = datetime.now(settings.tz)
-    return SYSTEM_TEMPLATE.format(
+    prompt= SYSTEM_TEMPLATE.format(
         owner=owner_name,
         now=now.strftime("%A %d/%m/%Y %H:%M"),
         tz=settings.timezone,
@@ -39,7 +39,9 @@ def build_system_prompt(settings: Settings, owner_name: str = "la consulta") -> 
         close_h=settings.office_close,
         days=", ".join(_DAY_NAMES[d] for d in settings.office_days),
     )
-
+    if known_name:
+       prompt += f"\nEste contacto ya se llama {known_name}. No le vuelvas a preguntar el nombre.\n"
+    return prompt
 
 HANDOFF_MESSAGE = (
     "Gracias por escribir. Esto prefiero que lo vea {owner} directamente, "
