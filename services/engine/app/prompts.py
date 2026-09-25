@@ -29,22 +29,24 @@ Si escriben fuera de ese horario, respondes igual, pero aclaras que
 _DAY_NAMES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 
-def build_system_prompt(settings: Settings, owner_name: str = "la consulta", known_name: str | None = None) -> str:
-    now = datetime.now(settings.tz)
-    prompt= SYSTEM_TEMPLATE.format(
-        owner=owner_name,
-        now=now.strftime("%A %d/%m/%Y %H:%M"),
-        tz=settings.timezone,
-        open_h=settings.office_open,
-        close_h=settings.office_close,
-        days=", ".join(_DAY_NAMES[d] for d in settings.office_days),
-    )
-    if known_name:
-       prompt += f"\nEste contacto ya se llama {known_name}. No le vuelvas a preguntar el nombre.\n"
-    return prompt
+def build_system_prompt(settings: Settings, owner_name: str = "la consulta", known_name: str | None = None, known_email: str | None = None) -> str:
+  now = datetime.now(settings.tz)
+  prompt= SYSTEM_TEMPLATE.format(
+    owner=owner_name,
+    now=now.strftime("%A %d/%m/%Y %H:%M"),
+    tz=settings.timezone,
+    open_h=settings.office_open,
+    close_h=settings.office_close,
+    days=", ".join(_DAY_NAMES[d] for d in settings.office_days),
+  )
+  if known_name:
+    prompt += f"\nEste contacto ya se llama {known_name}. No le vuelvas a preguntar el nombre.\n"
+  if known_name:
+    prompt += f"El correo de este contacto ya es {known_email}. No se lo vuelvas a pedir; usa ese valor directamente si necesitas client_email al reservar.\n"
+  return prompt
 
 HANDOFF_MESSAGE = (
-    "Gracias por escribir. Esto prefiero que lo vea {owner} directamente, "
-    "así que le paso tu mensaje ahora mismo y te responde en cuanto pueda.\n\n"
-    "Si es una urgencia, por favor llama al 112."
+  "Gracias por escribir. Esto prefiero que lo vea {owner} directamente, "
+  "así que le paso tu mensaje ahora mismo y te responde en cuanto pueda.\n\n"
+  "Si es una urgencia, por favor llama al 112."
 )

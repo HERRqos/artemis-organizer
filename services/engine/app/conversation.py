@@ -24,9 +24,9 @@ class Conversation:
         self._llm = llm
         self._owner = owner_name
 
-    def run(self, user_text: str, history: list[dict], ctx: ToolContext,known_name:str) -> tuple[str, list[dict]]:
+    def run(self, user_text: str, history: list[dict], ctx: ToolContext, known_name: str | None = None, known_email: str | None = None) -> tuple[str, list[dict]]:
         """Returns (reply_text, new_history)."""
-        system = build_system_prompt(self._s, self._owner, known_name)
+        system = build_system_prompt(self._s, self._owner, known_name,known_email)
         messages = history + [{"role": "user", "content": user_text}]
 
         for round_no in range(MAX_TOOL_ROUNDS):

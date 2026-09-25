@@ -72,9 +72,10 @@ def handle(msg, settings, sessions, whatsapp, calendar, practice, clients, conve
         return
     known = clients.get(msg.sender)
     known_name=known["name"] if known else None
+    known_email=known["email"] if known else None
     whatsapp.mark_read_and_typing(msg.message_id)
     ctx = ToolContext(settings, calendar, practice, msg.sender, clients)
-    reply, history = conversation.run(msg.text, sessions.history(msg.sender), ctx, known_name)
+    reply, history = conversation.run(msg.text, sessions.history(msg.sender), ctx, known_name,known_email)
     sessions.save(msg.sender, history)
 
     if ctx.escalated:
